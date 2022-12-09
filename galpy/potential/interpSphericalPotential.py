@@ -5,9 +5,12 @@ import numpy
 from scipy import interpolate
 
 from ..util.conversion import get_physical, physical_compatible
+from ..util._optional_deps import _JAX_LOADED
 from .Potential import _evaluatePotentials, _evaluateRforces
 from .SphericalPotential import SphericalPotential
 
+if _JAX_LOADED:
+    import jax.numpy as jnp
 
 class interpSphericalPotential(SphericalPotential):
     """__init__(self,rforce=None,rgrid=numpy.geomspace(0.01,20,101),Phi0=None,ro=None,vo=None)
@@ -46,6 +49,7 @@ Class that interpolates a spherical potential on a grid"""
         """
         SphericalPotential.__init__(self,amp=1.,ro=ro,vo=vo)
         self._rgrid= rgrid
+        self._rgrid_rforce_jax = rgrid if len(rgrid)>1000 else numpy.geomspace(0.01,20,1001)
         # Determine whether rforce is a galpy Potential or list thereof
         try:
             _evaluateRforces(rforce,1.,0.)
@@ -66,6 +70,7 @@ Class that interpolates a spherical potential on a grid"""
             if phys['voSet']:
                 self.turn_physical_on(vo=phys['vo'])
         self._rforce_grid= numpy.array([_rforce(r) for r in rgrid])
+        self._rforce_jax_grid = numpy.array([_rforce(r) for r in self._rgrid_rforce_jax])
         self._force_spline= interpolate.InterpolatedUnivariateSpline(
             self._rgrid,self._rforce_grid,k=3,ext=0)
         # Get potential and r2deriv as splines for the integral and derivative
@@ -94,6 +99,24 @@ Class that interpolates a spherical potential on a grid"""
         out[r >= self._rmax]= -self._total_mass/r[r >= self._rmax]**2.
         out[r < self._rmax]= self._force_spline(r[r < self._rmax])
         return out
+    
+    def _rforce_jax(self,r):
+        """
+        NAME:
+           _rforce_jax
+        PURPOSE:
+           evaluate the spherical radial force for this potential using JAX, 
+           which doesn't support splines, only linear interpolation. 
+        INPUT:
+           r - Galactocentric spherical radius
+        OUTPUT:
+           the radial force
+        HISTORY:
+           2021-04-03 - Written - Lane (UofT)
+        """
+        if not _JAX_LOADED: # pragma: no cover
+            raise ImportError("Making use of _rforce_jax function requires the google/jax library")
+        return jnp.interp(r,self._rgrid,self._rforce_grid)
 
     def _r2deriv(self,r,t=0.):
         out= numpy.empty_like(r)
@@ -107,3 +130,46 @@ Class that interpolates a spherical potential on a grid"""
         # Fall back onto Poisson eqn., implemented in SphericalPotential
         out[r < self._rmax]= SphericalPotential._rdens(self,r[r < self._rmax])
         return out
+
+    def _initialize_ddenstwobetadr_interp(self,twobeta=0.,nr=1001):
+        """
+        NAME:
+           _initialize_ddenstwobetadr_interp
+        PURPOSE:
+           Pre-calculate a grid of the radial density derivative x r^(2beta)
+           so that we can use jax functions (linear interpolation) correctly.
+    
+           Sets _dd2bdr_x (radial positions) and _dd2bdr_y (derivative) to be 
+           used by _ddenstwobetadr
+        INPUT:
+           twobeta= twice the anisotropy parameter (0)
+           nr= Number of grid points for the interpolation (100)
+        HISTORY:
+           2022-07-26 - Written - Lane (UofT)
+        """
+        redge = numpy.geomspace(self._rmin,self._rmax,num=nr+1)
+        d2b = self._rdens(redge)*redge**twobeta
+        self._dd2bdr_x = (redge[1:]+redge[:-1])/2.
+        self._dd2bdr_y = numpy.diff(d2b)/numpy.diff(redge)
+        self._dd2bdr_twobeta = twobeta
+    
+    
+    def _ddenstwobetadr(self,r,beta=0):
+        """
+        NAME:
+           _ddenstwobetadr
+        PURPOSE:
+           evaluate the radial density derivative x r^(2beta) for this potential
+        INPUT:
+           r - spherical radius
+           beta= (0)
+        OUTPUT:
+           d (rho x r^{2beta} ) / d r
+        HISTORY:
+           2022-07-26 - Written - Lane (UofT)
+        """
+        if not _JAX_LOADED: # pragma: no cover
+            raise ImportError("Making use of _rforce_jax function requires the google/jax library")
+        if not hasattr(self,'_dd2bdr_x') or self._dd2bdr_twobeta!=2.*beta:
+            self._initialize_ddenstwobetadr_interp(twobeta=2.*beta)
+        return jnp.interp(r,self._dd2bdr_x,self._dd2bdr_y)

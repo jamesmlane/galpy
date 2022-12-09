@@ -1705,7 +1705,8 @@ def test_constantbeta_differentpotentials_dens_directint():
     pots= [potential.HernquistPotential(amp=2.3,a=1.3),
            potential.PowerSphericalPotential(amp=1.3,alpha=1.9),
            potential.PlummerPotential(amp=2.3,b=1.3),
-           potential.PowerSphericalPotentialwCutoff(amp=1.3,alpha=1.9,rc=1.2)]
+           potential.PowerSphericalPotentialwCutoff(amp=1.3,alpha=1.9,rc=1.2),
+           potential.interpSphericalPotential(rforce=potential.HernquistPotential(amp=1.7,a=1.5))]
     twobetas= [-1 for pot in pots]
     tols= [1e-3 for pot in pots]
     for pot,twobeta,tol in zip(pots,twobetas,tols):
