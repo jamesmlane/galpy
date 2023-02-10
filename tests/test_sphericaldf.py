@@ -1722,6 +1722,28 @@ def test_constantbeta_differentpotentials_dens_directint():
                              bins=11)
     return None
 
+def test_constantbeta_interpolatedpotentials_dens_directint():
+    if WIN32: return None # skip on appveyor, because no JAX
+    # Combinations of interpolated potentials and betas
+    pots= [potential.HernquistPotential(amp=2.3,a=1.3),
+           potential.PowerSphericalPotential(amp=1.3,alpha=1.9),
+           potential.PlummerPotential(amp=2.3,b=1.3),
+           potential.PowerSphericalPotentialwCutoff(amp=1.3,alpha=1.9,rc=1.2)]
+    twobetas= [-1 for pot in pots]
+    tols= [1e-3 for pot in pots]
+    for pot,twobeta,tol in zip(pots,twobetas,tols):
+        ipot = potential.interpSphericalPotential(rforce=pot)
+        dfh= constantbetadf(pot=ipot,twobeta=twobeta)
+        check_dens_directint(dfh,ipot,tol,
+                             lambda r: ipot.dens(r,0),
+                             rmin=ipot._scale/10.
+                                if hasattr(ipot,'_scale')
+                                else 0.1,
+                             rmax=ipot._scale*10.
+                                if hasattr(ipot,'_scale')
+                                else 10.,
+                             bins=11)
+
 ########################### TESTS OF ERRORS AND WARNINGS#######################
 
 def test_isotropic_hernquist_nopot():
@@ -1915,6 +1937,7 @@ def check_dens_directint(dfi,pot,tol,dens,
     rs= numpy.linspace(rmin,rmax,bins)
     intdens= numpy.array([dfi.vmomentdensity(r,0,0) for r in rs])
     expdens= numpy.array([dens(r) for r in rs])
+    import pdb; pdb.set_trace()
     assert numpy.all(numpy.fabs(intdens/expdens-1.) < tol), \
         "Density from direct integration is not equal to the expected value"
     return None
